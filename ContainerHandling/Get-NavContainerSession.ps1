@@ -38,8 +38,8 @@ function Get-BcContainerSession {
                 $session = New-PSSession -ContainerId $containerId -RunAsAdministrator
             }
             'kubectl' {
-                #$container = Get-BcContainerId -containerName $containerName
-                #$session = New-PSSession -ContainerId $containerId -RunAsAdministrator
+                $connection = Connect-Resource -Name $containerName -Ports 5985
+                $session = New-PSSession -Port $connection.mapping.5985 -RunAsAdministrator
             }
         }
         Invoke-Command -Session $session -ScriptBlock { Param([bool]$silent)
