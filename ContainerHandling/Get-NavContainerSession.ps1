@@ -31,8 +31,17 @@ function Get-BcContainerSession {
                 $sessions.Remove($containerName)
             }
         }
-        $containerId = Get-BcContainerId -containerName $containerName
-        $session = New-PSSession -ContainerId $containerId -RunAsAdministrator
+        switch ($bcContainerHelperConfig.ContainerClient)
+        {
+            'docker' {
+                $containerId = Get-BcContainerId -containerName $containerName
+                $session = New-PSSession -ContainerId $containerId -RunAsAdministrator
+            }
+            'kubectl' {
+                #$container = Get-BcContainerId -containerName $containerName
+                #$session = New-PSSession -ContainerId $containerId -RunAsAdministrator
+            }
+        }
         Invoke-Command -Session $session -ScriptBlock { Param([bool]$silent)
 
             $ErrorActionPreference = 'Stop'

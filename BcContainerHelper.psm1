@@ -70,6 +70,7 @@ function Get-ContainerHelperConfig {
             "TreatWarningsAsErrors" = @('AL1026')
             "TelemetryConnectionString" = ""
             "UseExtendedTelemetry" = $false
+            "ContainerClient" = "docker"
         }
         $bcContainerHelperConfigFile = "C:\ProgramData\BcContainerHelper\BcContainerHelper.config.json"
         if (Test-Path $bcContainerHelperConfigFile) {
