@@ -137,11 +137,13 @@ function Set-RunFalseOnDisabledTests
     $removeTestMethodControl = $ClientContext.GetControlByName($Form, "DisableTestMethod")
     foreach($disabledTestMethod in $DisabledTests)
     {
-        if ($debugMode) {
-            Write-Host "Disabling Test $($disabledTestMethod.codeunitName):$($disabledTestMethod.method)"
+        $disabledTestMethod.method | ForEach-Object {
+            if ($debugMode) {
+                Write-Host "Disabling Test $($disabledTestMethod.codeunitName):$_"
+            }
+            $testKey = $disabledTestMethod.codeunitName + "," + $_
+            $ClientContext.SaveValue($removeTestMethodControl, $testKey)
         }
-        $testKey = $disabledTestMethod.codeunitName + "," + $disabledTestMethod.method
-        $ClientContext.SaveValue($removeTestMethodControl, $testKey)
     }
 }
 
@@ -304,11 +306,11 @@ function Run-ConnectionTest {
         [switch] $connectFromHost
     )
 
-    $rolecenter = $clientContext.OpenForm(9022)
-    if (!($rolecenter)) {
-        throw "Cannot open rolecenter"
-    }
-    Write-Host "Rolecenter 9022 opened successfully"
+#    $rolecenter = $clientContext.OpenForm(9020)
+#    if (!($rolecenter)) {
+#        throw "Cannot open rolecenter"
+#    }
+#    Write-Host "Rolecenter 9020 opened successfully"
 
     $extensionManagement = $clientContext.OpenForm(2500)
     if (!($extensionManagement)) {
@@ -398,7 +400,7 @@ function Run-Tests {
 
     if ($XUnitResultFileName) {
         if (($Rerun -or $AppendToXUnitResultFile) -and (Test-Path $XUnitResultFileName)) {
-            [xml]$XUnitDoc = Get-Content $XUnitResultFileName
+            [xml]$XUnitDoc = [System.IO.File]::ReadAllLines($XUnitResultFileName)
             $XUnitAssemblies = $XUnitDoc.assemblies
             if (-not $XUnitAssemblies) {
                 [xml]$XUnitDoc = New-Object System.Xml.XmlDocument
@@ -419,7 +421,7 @@ function Run-Tests {
     }
     if ($JUnitResultFileName) {
         if (($Rerun -or $AppendToJUnitResultFile) -and (Test-Path $JUnitResultFileName)) {
-            [xml]$JUnitDoc = Get-Content $JUnitResultFileName
+            [xml]$JUnitDoc = [System.IO.File]::ReadAllLines($JUnitResultFileName)
 
             $JUnitTestSuites = $JUnitDoc.testsuites
             if (-not $JUnitTestSuites) {

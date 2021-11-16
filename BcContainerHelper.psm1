@@ -1,7 +1,10 @@
 #Requires -PSEdition Desktop 
 
 param(
-    [switch] $Silent
+    [switch] $Silent,
+    [switch] $ExportTelemetryFunctions,
+    [string[]] $bcContainerHelperConfigFile = @(),
+    [switch] $useVolumes
 )
 
 Set-StrictMode -Version 2.0
@@ -29,6 +32,7 @@ function Get-ContainerHelperConfig {
             "genericImageName" = 'mcr.microsoft.com/businesscentral:{0}'
             "genericImageNameFilesOnly" = 'mcr.microsoft.com/businesscentral:{0}-filesonly'
             "usePsSession" = $isAdministrator
+            "useVolumeForMyFolder" = $false
             "use7zipIfAvailable" = $true
             "defaultNewContainerParameters" = @{ }
             "hostHelperFolder" = "C:\ProgramData\BcContainerHelper"
@@ -68,29 +72,43 @@ function Get-ContainerHelperConfig {
             }
             "TraefikUseDnsNameAsHostName" = $false
             "TreatWarningsAsErrors" = @('AL1026')
-            "TelemetryConnectionString" = ""
-            "UseExtendedTelemetry" = $false
             "ContainerClient" = "docker"
+            "PartnerTelemetryConnectionString" = ""
+            "MicrosoftTelemetryConnectionString" = ""
+            "SendExtendedTelemetryToMicrosoft" = $false
+            "TraefikImage" = "traefik:v1.7-windowsservercore-1809"
+            "ObjectIdForInternalUse" = 88123
         }
-        $bcContainerHelperConfigFile = "C:\ProgramData\BcContainerHelper\BcContainerHelper.config.json"
-        if (Test-Path $bcContainerHelperConfigFile) {
-            try {
-                $savedConfig = Get-Content $bcContainerHelperConfigFile | ConvertFrom-Json
-                if ("$savedConfig") {
-                    $keys = $bcContainerHelperConfig.Keys | % { $_ }
-                    $keys | % {
-                        if ($savedConfig.PSObject.Properties.Name -eq "$_") {
-                            if (!$silent) {
-                                Write-Host "Setting $_ = $($savedConfig."$_")"
+
+        if ($useVolumes) {
+            $bcContainerHelperConfig.bcartifactsCacheFolder = "bcartifacts.cache"
+            $bcContainerHelperConfig.hostHelperFolder = "hostHelperFolder"
+            $bcContainerHelperConfig.useVolumeForMyFolder = $true
+        }
+
+        if ($bcContainerHelperConfigFile -notcontains "C:\ProgramData\BcContainerHelper\BcContainerHelper.config.json") {
+            $bcContainerHelperConfigFile = @("C:\ProgramData\BcContainerHelper\BcContainerHelper.config.json")+$bcContainerHelperConfigFile
+        }
+        $bcContainerHelperConfigFile | ForEach-Object {
+            $configFile = $_
+            if (Test-Path $configFile) {
+                try {
+                    $savedConfig = Get-Content $configFile | ConvertFrom-Json
+                    if ("$savedConfig") {
+                        $keys = $bcContainerHelperConfig.Keys | % { $_ }
+                        $keys | % {
+                            if ($savedConfig.PSObject.Properties.Name -eq "$_") {
+                                if (!$silent) {
+                                    Write-Host "Setting $_ = $($savedConfig."$_")"
+                                }
+                                $bcContainerHelperConfig."$_" = $savedConfig."$_"
                             }
-                            $bcContainerHelperConfig."$_" = $savedConfig."$_"
-            
                         }
                     }
                 }
-            }
-            catch {
-                throw "Error reading configuration file $bcContainerHelperConfigFile, cannot import module."
+                catch {
+                    throw "Error reading configuration file $configFile, cannot import module."
+                }
             }
         }
         Export-ModuleMember -Variable bcContainerHelperConfig
@@ -143,7 +161,26 @@ try {
 }
 catch {}
 
-$hostHelperFolder = $bcContainerHelperConfig.HostHelperFolder
+function VolumeOrPath {
+    Param(
+        [string] $path
+    )
+
+    if (!($path.Contains(':') -or $path.Contains('\') -or $path.Contains('/'))) {
+        $volumes = @(docker volume ls --format "{{.Name}}")
+        if ($volumes -notcontains $path) {
+            docker volume create $path            
+        }
+        $inspect = (docker volume inspect $path) | ConvertFrom-Json
+        return $inspect.MountPoint
+    }
+    else {
+        return $path
+    }
+}
+
+$bcartifactsCacheFolder = VolumeOrPath $bcContainerHelperConfig.bcartifactsCacheFolder
+$hostHelperFolder = VolumeOrPath $bcContainerHelperConfig.HostHelperFolder
 $extensionsFolder = Join-Path $hostHelperFolder "Extensions"
 $containerHelperFolder = $bcContainerHelperConfig.ContainerHelperFolder
 
@@ -155,18 +192,17 @@ if (!$silent) {
 $ENV:DOCKER_SCAN_SUGGEST = "$($bcContainerHelperConfig.DOCKER_SCAN_SUGGEST)".ToLowerInvariant()
 
 $telemetry = @{
-    "Client" = $null
+    "Assembly" = $null
+    "PartnerClient" = $null
+    "MicrosoftClient" = $null
     "CorrelationId" = ""
     "TopId" = ""
     "Debug" = $false
 }
 try {
-    $assembly = [System.Reflection.Assembly]::LoadFrom((Join-Path $PSScriptRoot "Microsoft.ApplicationInsights.dll"))
-    $telemetry.Client = $assembly.CreateInstance('Microsoft.ApplicationInsights.TelemetryClient')
-    $telemetry.Client.TelemetryConfiguration.DisableTelemetry = $true
+    $telemetry.Assembly = [System.Reflection.Assembly]::LoadFrom((Join-Path $PSScriptRoot "Microsoft.ApplicationInsights.dll"))
 } catch {
-    Write-Host -ForegroundColor Yellow "Unable to initialize Telemetry Client (Error: $($_.Exception.Message))"
-    $telemetry.Client = $null
+    Write-Host -ForegroundColor Yellow "Unable to load ApplicationInsights.dll"
 }
 
 $sessions = @{}
@@ -187,9 +223,18 @@ if (!(Test-Path -Path $extensionsFolder -PathType Container)) {
 
 . (Join-Path $PSScriptRoot "HelperFunctions.ps1")
 . (Join-Path $PSScriptRoot "TelemetryHelper.ps1")
-. (Join-Path $PSScriptRoot "Check-BcContainerHelperPermissions.ps1")
+if ($ExportTelemetryFunctions) {
+    Export-ModuleMember -Function RegisterTelemetryScope
+    Export-ModuleMember -Function InitTelemetryScope
+    Export-ModuleMember -Function AddTelemetryProperty
+    Export-ModuleMember -Function TrackTrace
+    Export-ModuleMember -Function TrackException
+}
 
-Check-BcContainerHelperPermissions -Silent
+. (Join-Path $PSScriptRoot "Check-BcContainerHelperPermissions.ps1")
+if (!$silent) {
+    Check-BcContainerHelperPermissions -Silent
+}
 
 # Container Info functions
 . (Join-Path $PSScriptRoot "ContainerInfo\Get-NavContainerNavVersion.ps1")
@@ -276,6 +321,7 @@ Check-BcContainerHelperPermissions -Silent
 . (Join-Path $PSScriptRoot "AppHandling\Extract-AppFileToFolder.ps1")
 . (Join-Path $PSScriptRoot "AppHandling\Replace-DependenciesInAppFile.ps1")
 . (Join-Path $PSScriptRoot "AppHandling\Run-TestsInNavContainer.ps1")
+. (Join-Path $PSScriptRoot "AppHandling\Run-BCPTTestsInBcContainer.ps1")
 . (Join-Path $PSScriptRoot "AppHandling\Run-ConnectionTestToNavContainer.ps1")
 . (Join-Path $PSScriptRoot "AppHandling\Get-TestsFromNavContainer.ps1")
 . (Join-Path $PSScriptRoot "AppHandling\Create-AlProjectFolderFromNavContainer.ps1")

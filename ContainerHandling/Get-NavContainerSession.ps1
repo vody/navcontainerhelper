@@ -16,31 +16,38 @@ function Get-BcContainerSession {
     [CmdletBinding()]
     Param (
         [string] $containerName = $bcContainerHelperConfig.defaultContainerName,
-        [switch] $silent
+        [switch] $silent,
+        [switch] $reinit
     )
 
     Process {
+        $newsession = $false
+        $session = $null
         if ($sessions.ContainsKey($containerName)) {
             $session = $sessions[$containerName]
             try {
-                $ok = Invoke-Command -Session $session -ScriptBlock { $true }
-                return $session
+                Invoke-Command -Session $session -ScriptBlock { $true } | Out-Null
+                if (!$reinit) { return $session }
             }
             catch {
                 Remove-PSSession -Session $session
                 $sessions.Remove($containerName)
+                $session = $null
             }
         }
-        switch ($bcContainerHelperConfig.ContainerClient)
-        {
-            'docker' {
-                $containerId = Get-BcContainerId -containerName $containerName
-                $session = New-PSSession -ContainerId $containerId -RunAsAdministrator
+        if (!$session) {
+            switch ($bcContainerHelperConfig.ContainerClient)
+            {
+                'docker' {
+                    $containerId = Get-BcContainerId -containerName $containerName
+                    $session = New-PSSession -ContainerId $containerId -RunAsAdministrator
+                }
+                'kubectl' {
+                    $connection = Connect-Resource -Name $containerName -Ports 5985
+                    $session = New-PSSession -Port $connection.mapping.5985 -RunAsAdministrator
+                }
             }
-            'kubectl' {
-                $connection = Connect-Resource -Name $containerName -Ports 5985
-                $session = New-PSSession -Port $connection.mapping.5985 -RunAsAdministrator
-            }
+            $newsession = $true
         }
         Invoke-Command -Session $session -ScriptBlock { Param([bool]$silent)
 
@@ -71,7 +78,9 @@ function Get-BcContainerSession {
 
             Set-Location $runPath
         } -ArgumentList $silent
-        $sessions.Add($containerName, $session)
+        if ($newsession) {
+            $sessions.Add($containerName, $session)
+        }
         return $session
     }
 }

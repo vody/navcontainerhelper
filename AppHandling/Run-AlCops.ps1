@@ -44,7 +44,7 @@ function Run-AlCops {
         $apps,
         $affixes,
         $supportedCountries,
-        $appPackagesFolder = (Join-Path $bcContainerHelperConfig.hostHelperFolder ([Guid]::NewGuid().ToString())),
+        $appPackagesFolder = (Join-Path $hosthelperfolder ([Guid]::NewGuid().ToString())),
         [switch] $enableAppSourceCop,
         [switch] $enableCodeCop,
         [switch] $enableUICop,
@@ -75,7 +75,7 @@ try {
         throw "You cannot run AppSourceCop and PerTenantExtensionCop at the same time"
     }
      
-    $appsFolder = Join-Path $bcContainerHelperConfig.hostHelperFolder ([Guid]::NewGuid().ToString())
+    $appsFolder = Join-Path $hosthelperfolder ([Guid]::NewGuid().ToString())
     New-Item -Path $appsFolder -ItemType Directory | Out-Null
     $apps = Sort-AppFilesByDependencies -containerName $containerName -appFiles @(CopyAppFilesToFolder -appFiles $apps -folder $appsFolder) -WarningAction SilentlyContinue
     
@@ -96,7 +96,7 @@ try {
             try {
                 Extract-AppFileToFolder -appFilename $appFile -appFolder $tmpFolder -generateAppJson
                 $xappJsonFile = Join-Path $tmpFolder "app.json"
-                $xappJson = Get-Content $xappJsonFile | ConvertFrom-Json
+                $xappJson = [System.IO.File]::ReadAllLines($xappJsonFile) | ConvertFrom-Json
                 Write-Host "$($xappJson.Publisher)_$($xappJson.Name) = $($xappJson.Version)"
                 $previousAppVersions += @{ "$($xappJson.Publisher)_$($xappJson.Name)" = $xappJson.Version }
             }
@@ -115,12 +115,12 @@ try {
     $apps | % {
         $appFile = $_
     
-        $tmpFolder = Join-Path $bcContainerHelperConfig.hostHelperFolder ([Guid]::NewGuid().ToString())
+        $tmpFolder = Join-Path $hosthelperfolder ([Guid]::NewGuid().ToString())
         try {
             $artifactUrl = Get-BcContainerArtifactUrl -containerName $containerName
 
             Extract-AppFileToFolder -appFilename $appFile -appFolder $tmpFolder -generateAppJson
-            $appJson = Get-Content (Join-Path $tmpFolder "app.json") | ConvertFrom-Json
+            $appJson = [System.IO.File]::ReadAllLines((Join-Path $tmpFolder "app.json")) | ConvertFrom-Json
 
             $ruleset = $null
 
@@ -174,7 +174,7 @@ try {
                 })
 
                 Write-Host "AppSourceCop.json content:"
-                get-content  (Join-Path $tmpFolder "appSourceCop.json") | Out-Host
+                [System.IO.File]::ReadAllLines((Join-Path $tmpFolder "appSourceCop.json")) | Out-Host
             }
             Remove-Item -Path (Join-Path $tmpFolder '*.xml') -Force
 
@@ -212,7 +212,7 @@ try {
                     "ruleset" = $myRulesetFile
                 }
                 Write-Host "Ruleset.json content:"
-                get-content  $myRulesetFile | Out-Host
+                [System.IO.File]::ReadAllLines($myRulesetFile) | Out-Host
             }
 
             try {

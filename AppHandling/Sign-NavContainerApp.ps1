@@ -44,25 +44,25 @@ try {
         throw "The app ($appFile)needs to be in a folder, which is shared with the container $containerName"
     }
 
-    $ExtensionsFolder = Join-Path $bcContainerHelperConfig.hostHelperFolder "Extensions"
-    $sharedPfxFile = Join-Path $ExtensionsFolder "$containerName\my\certificate.pfx"
-    $removeSharedPfxFile = $true
-    if ($pfxFile -like "https://*" -or $pfxFile -like "http://*") {
-        Write-Host "Downloading certificate file to container"
-        (New-Object System.Net.WebClient).DownloadFile($pfxFile, $sharedPfxFile)
-    }
-    else {
-        if (Get-BcContainerPath -containerName $containerName -path $pfxFile) {
-            $sharedPfxFile = $pfxFile
-            $removeSharedPfxFile = $false
-        }
-        else {
-            Write-Host "Copying certificate file to container"
-            Copy-Item -Path $pfxFile -Destination $sharedPfxFile -Force
-        }
-    }
+#    $ExtensionsFolder = Join-Path $hosthelperfolder "Extensions"
+#    $sharedPfxFile = Join-Path $ExtensionsFolder "$containerName\my\certificate.pfx"
+#    $removeSharedPfxFile = $true
+#    if ($pfxFile -like "https://*" -or $pfxFile -like "http://*") {
+#        Write-Host "Downloading certificate file to container"
+#        (New-Object System.Net.WebClient).DownloadFile($pfxFile, $sharedPfxFile)
+#    }
+#    else {
+#        if (Get-BcContainerPath -containerName $containerName -path $pfxFile) {
+#            $sharedPfxFile = $pfxFile
+#            $removeSharedPfxFile = $false
+#        }
+#        else {
+#            Write-Host "Copying certificate file to container"
+#            Copy-Item -Path $pfxFile -Destination $sharedPfxFile -Force
+#        }
+#    }
 
-    $ExtensionsFolder = Join-Path $bcContainerHelperConfig.hostHelperFolder "Extensions"
+    $ExtensionsFolder = Join-Path $hosthelperfolder "Extensions"
     $sharedPfxFile = Join-Path $ExtensionsFolder "$containerName\my\$([GUID]::NewGuid().ToString()).pfx"
     $removeSharedPfxFile = $true
     if ($pfxFile -like "https://*" -or $pfxFile -like "http://*") {
