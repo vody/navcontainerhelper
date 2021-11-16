@@ -5,7 +5,7 @@
 - [x] Get-BcContainerSession
 - [x] Invoke-ScriptInBcContainer
 - [x] Open-BcContainer
-- [ ] Enter-BcContainer
+- [x] Enter-BcContainer
 - [ ] Remove-BcContainerSession
 - [ ] Extract-FilesFromStoppedBcContainer
 - [ ] Wait-BcContainerReady
