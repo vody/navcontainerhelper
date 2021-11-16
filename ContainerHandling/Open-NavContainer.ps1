@@ -28,7 +28,15 @@ function Open-BcContainer {
         catch {
             $psPrompt = """function prompt {'[$($containerName.ToUpperInvariant())] PS '+`$executionContext.SessionState.Path.CurrentLocation+('>'*(`$nestedPromptLevel+1))+' '}; . 'c:\run\prompt.ps1'"""
         }
-        Start-Process "cmd.exe" @("/C";"docker exec -it $containerName powershell -noexit $psPrompt")
+        switch ($bcContainerHelperConfig.ContainerClient)
+        {
+            'docker' {
+                Start-Process "cmd.exe" @("/C";"docker exec -it $containerName powershell -noexit $psPrompt")
+            }
+            'kubectl' {
+                Start-Process "cmd.exe" @("/C";"kubectl exec $containerName -i powershell -noexit $psPrompt")
+            }
+        }
     }
 }
 Set-Alias -Name Open-NavContainer -Value Open-BcContainer
