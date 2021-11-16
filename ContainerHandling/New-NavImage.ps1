@@ -52,6 +52,38 @@ function New-BcImage {
         $allImages
     )
 
+
+function RoboCopyFiles {
+    Param(
+        [string] $source,
+        [string] $destination,
+        [string] $files = "*",
+        [switch] $e
+    )
+
+    Write-Host $source
+    if ($e) {
+        RoboCopy "$source" "$destination" "$files" /e /NFL /NDL /NJH /NJS /nc /ns /np /mt /z /nooffload | Out-Null
+        Get-ChildItem -Path $source -Filter $files -Recurse | ForEach-Object {
+            $destPath = Join-Path $destination $_.FullName.Substring($source.Length)
+            while (!(Test-Path $destPath)) {
+                Write-Host "Waiting for $destPath to be available"
+                Start-Sleep -Seconds 1
+            }
+        }
+    }
+    else {
+        RoboCopy "$source" "$destination" "$files" /NFL /NDL /NJH /NJS /nc /ns /np /mt /z /nooffload | Out-Null
+        Get-ChildItem -Path $source -Filter $files | ForEach-Object {
+            $destPath = Join-Path $destination $_.FullName.Substring($source.Length)
+            while (!(Test-Path $destPath)) {
+                Write-Host "Waiting for $destPath to be available"
+                Start-Sleep -Seconds 1
+            }
+        }
+    }
+}
+
 $telemetryScope = InitTelemetryScope `
                     -name $MyInvocation.InvocationName `
                     -parameterValues $PSBoundParameters `
@@ -84,6 +116,7 @@ try {
     $hostOsVersion = [System.Version]::Parse("$($os.Version).$UBR")
     $hostOs = "Unknown/Insider build"
     $bestGenericImageName = Get-BestGenericImageName -onlyMatchingBuilds -filesOnly:$filesOnly
+    $isServerHost = $os.ProductType -eq 3
 
     if ("$baseImage" -eq "") {
         if ("$bestGenericImageName" -eq "") {
@@ -93,13 +126,16 @@ try {
         $baseImage = $bestGenericImageName
     }
 
-    if ($os.BuildNumber -eq 20348) { 
+    if ($os.BuildNumber -eq 20348 -or $os.BuildNumber -eq 22000) { 
         if ($isServerHost) {
             $hostOs = "ltsc2022"
         }
         else {
-            $hostOs = "11"
+            $hostOs = "21H2"
         }
+    }
+    elseif ($os.BuildNumber -eq 19044) { 
+        $hostOs = "21H2"
     }
     elseif ($os.BuildNumber -eq 19043) { 
         $hostOs = "21H1"
@@ -308,6 +344,9 @@ try {
             elseif ("$containerOsVersion".StartsWith('10.0.19043.')) {
                 $containerOs = "21H1"
             }
+            elseif ("$containerOsVersion".StartsWith('10.0.19044.')) {
+                $containerOs = "21H2"
+            }
             elseif ("$containerOsVersion".StartsWith('10.0.20348.')) {
                 $containerOs = "ltsc2022"
             }
@@ -330,7 +369,7 @@ try {
                     $isolation = "process"
                 }
             }
-            elseif ("$hostOsVersion".StartsWith('10.0.20348.') -and "$containerOsVersion".StartsWith("10.0.20348.")) {
+            elseif ($hostOsVersion.Build -ge 20348 -and $containerOsVersion.Build -ge 20348) {
                 if ($containerOsVersion -le $hostOsVersion) {
                     $isolation = "process"
                 }
@@ -341,6 +380,12 @@ try {
             elseif ("$hostOsVersion".StartsWith('10.0.19043.') -and "$containerOsVersion".StartsWith("10.0.19041.")) {
                 if ($isolation -eq "") {
                     Write-Host -ForegroundColor Yellow "WARNING: Host OS is 21H1 and Container OS is 2004, defaulting to process isolation. If you experience problems, add -isolation hyperv."
+                    $isolation = "process"
+                }
+            }
+            elseif ("$hostOsVersion".StartsWith('10.0.19044.') -and "$containerOsVersion".StartsWith("10.0.19041.")) {
+                if ($isolation -eq "") {
+                    Write-Host -ForegroundColor Yellow "WARNING: Host OS is 21H2 and Container OS is 2004, defaulting to process isolation. If you experience problems, add -isolation hyperv."
                     $isolation = "process"
                 }
             }
@@ -367,13 +412,13 @@ try {
             }
             Write-Host "Using $isolation isolation"
         
-            $downloadsPath = (Get-ContainerHelperConfig).bcartifactsCacheFolder
+            $downloadsPath = $bcartifactsCacheFolder
             if (!(Test-Path $downloadsPath)) {
                 New-Item $downloadsPath -ItemType Directory | Out-Null
             }
         
             do {
-                $buildFolder = Join-Path (Get-ContainerHelperConfig).bcartifactsCacheFolder ([System.IO.Path]::GetRandomFileName())
+                $buildFolder = Join-Path $bcartifactsCacheFolder ([System.IO.Path]::GetRandomFileName())
             }
             until (New-Item $buildFolder -ItemType Directory -ErrorAction SilentlyContinue)
         
@@ -466,7 +511,7 @@ try {
                 New-Item $navDvdPath -ItemType Directory | Out-Null
         
                 Write-Host "Copying Platform Artifacts"
-                Robocopy "$platformArtifactPath" "$navDvdPath" /e /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+                RobocopyFiles -source "$platformArtifactPath" -destination "$navDvdPath" -e
         
                 if (!$skipDatabase) {
                     $dbPath = Join-Path $navDvdPath "SQLDemoDatabase\CommonAppData\Microsoft\Microsoft Dynamics NAV\ver\Database"
@@ -489,7 +534,7 @@ try {
                             Remove-Item -path $destFolder -Recurse -Force
                         }
                         Write-Host "Copying $name"
-                        RoboCopy "$appSubFolder" "$destFolder" /e /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+                        RoboCopyFiles -Source "$appSubFolder" -Destination "$destFolder" -e
                     }
                 }
             

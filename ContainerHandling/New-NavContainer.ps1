@@ -187,7 +187,7 @@ function New-BcContainer {
         [switch] $accept_eula,
         [switch] $accept_outdated = $true,
         [string] $containerName = $bcContainerHelperConfig.defaultContainerName,
-        [string] $imageName = "", 
+        [string] $imageName = "",
         [string] $artifactUrl = "", 
         [Alias('navDvdPath')]
         [string] $dvdPath = "", 
@@ -279,7 +279,7 @@ $telemetryScope = InitTelemetryScope `
                     -includeParameters @("containerName","artifactUrl","isolation","imageName","multitenant","filesOnly")
 try {
 
-    $defaultNewContainerParameters = (Get-ContainerHelperConfig).defaultNewContainerParameters
+    $defaultNewContainerParameters = $bcContainerHelperConfig.defaultNewContainerParameters
     if ($defaultNewContainerParameters -is [HashTable]) {
         $defaultNewContainerParameters.GetEnumerator() | ForEach-Object {
             if (!($PSBoundParameters.ContainsKey($_.Name))) {
@@ -409,13 +409,17 @@ try {
 
     $isServerHost = $os.ProductType -eq 3
 
-    if ($os.BuildNumber -eq 20348) { 
+
+    if ($os.BuildNumber -eq 20348 -or $os.BuildNumber -eq 22000) { 
         if ($isServerHost) {
             $hostOs = "ltsc2022"
         }
         else {
-            $hostOs = "11"
+            $hostOs = "21H2"
         }
+    }
+    elseif ($os.BuildNumber -eq 19044) { 
+        $hostOs = "21H2"
     }
     elseif ($os.BuildNumber -eq 19043) { 
         $hostOs = "21H1"
@@ -503,6 +507,10 @@ try {
     $skipDatabase = $false
     if ($bakFile -ne "" -or $databaseServer -ne "" -or $databaseInstance -ne "" -or "$databasePrefix$databaseName" -ne "") {
         $skipDatabase = $true
+    }
+
+    if ($imageName -eq "" -and $artifactUrl -eq "" -and $dvdPath -eq "") {
+        throw "You have to specify artifactUrl or imageName when creating a new container."            
     }
 
     # Remove if it already exists
@@ -664,7 +672,7 @@ try {
     $navVersion = $dvdVersion
     $bcStyle = "onprem"
 
-    $downloadsPath = (Get-ContainerHelperConfig).bcartifactsCacheFolder
+    $downloadsPath = $bcContainerHelperConfig.bcartifactsCacheFolder
     if (!(Test-Path $downloadsPath)) {
         New-Item $downloadsPath -ItemType Directory | Out-Null
     }
@@ -1029,6 +1037,9 @@ try {
     elseif ("$containerOsVersion".StartsWith('10.0.19043.')) {
         $containerOs = "21H1"
     }
+    elseif ("$containerOsVersion".StartsWith('10.0.19044.')) {
+        $containerOs = "21H2"
+    }
     elseif ("$containerOsVersion".StartsWith('10.0.20348.')) {
         $containerOs = "ltsc2022"
     }
@@ -1158,6 +1169,9 @@ try {
         elseif ("$containerOsVersion".StartsWith('10.0.19043.')) {
             $containerOs = "21H1"
         }
+        elseif ("$containerOsVersion".StartsWith('10.0.19044.')) {
+            $containerOs = "21H2"
+        }
         elseif ("$containerOsVersion".StartsWith('10.0.20348.')) {
             $containerOs = "ltsc2022"
         }
@@ -1171,20 +1185,27 @@ try {
         Write-Host "Generic Tag of better generic: $genericTagVersion"
     }
 
+    if ($version.Major -lt 15 -and ($genericTag -eq "1.0.1.7")) {
+        Write-Host "Patching start.ps1 due to issue #2130"
+        $myscripts += @( "https://raw.githubusercontent.com/microsoft/nav-docker/master/generic/Run/start.ps1" )
+    }
+
     if ($hostOsVersion -eq $containerOsVersion) {
         if ($isolation -eq "") {
             $isolation = "process"
         }
     }
-    elseif ("$hostOsVersion".StartsWith('10.0.20348.') -and "$containerOsVersion".StartsWith("10.0.20348.")) {
-        if ($containerOsVersion -le $hostOsVersion) {
-            $isolation = "process"
-        }
-        else {
-            $isolation = "hyperv"
+    elseif ($hostOsVersion.Build -ge 20348 -and $containerOsVersion.Build -ge 20348) {
+        if ($isolation -eq "") {
+            if ($containerOsVersion -le $hostOsVersion) {
+                $isolation = "process"
+            }
+            else {
+                $isolation = "hyperv"
+            }
         }
     }
-    elseif ("$hostOsVersion".StartsWith('10.0.19043.') -and "$containerOsVersion".StartsWith("10.0.19041.")) {
+    elseif (("$hostOsVersion".StartsWith('10.0.19043.') -or "$hostOsVersion".StartsWith('10.0.19044.')) -and "$containerOsVersion".StartsWith("10.0.19041.")) {
         if ($isolation -eq "") {
             Write-Host -ForegroundColor Yellow "WARNING: Host OS is 21H1 and Container OS is 2004, defaulting to process isolation. If you experience problems, add -isolation hyperv."
             $isolation = "process"
@@ -1248,8 +1269,19 @@ try {
         throw "EnableSymbolLoading is no longer needed in Dynamics 365 Business Central 2019 wave 2 release (1910 / 15.x)"
     }
 
-    $myFolder = Join-Path $containerFolder "my"
-    New-Item -Path $myFolder -ItemType Directory -ErrorAction Ignore | Out-Null
+    if ($bcContainerHelperConfig.UseVolumeForMyFolder) {
+        $myVolumeName = "$containerName-my"
+        if ($allVolumes | Where-Object { $_ -like "*|$myVolumeName" }) {
+            throw "Fatal error, volume $myVolumeName already exists"
+        }
+        docker volume create $myVolumeName
+        $myFolder = ((docker volume inspect $myVolumeName) | ConvertFrom-Json).MountPoint
+        $allVolumes += "$myfolder|$myVolumeName"
+    }
+    else {
+        $myFolder = Join-Path $containerFolder "my"
+        New-Item -Path $myFolder -ItemType Directory -ErrorAction Ignore | Out-Null
+    }
 
     if ($useTraefik) {
         Write-Host "Adding special CheckHealth.ps1 to enable Traefik support"
@@ -1379,7 +1411,6 @@ try {
         $parameters += @( "--env licenseFile=""$containerLicenseFile""" )
     }
 
-
     $parameters += @(
                     "--name $containerName",
                     "--hostname $containerName",
@@ -1390,7 +1421,7 @@ try {
                     "--env databaseServer=""$databaseServer""",
                     "--env databaseInstance=""$databaseInstance""",
                     (getVolumeMountParameter -volumes $allVolumes -hostPath $hostHelperFolder -containerPath $containerHelperFolder),
-                    "--volume ""$($myFolder):C:\Run\my""",
+                    (getVolumeMountParameter -volumes $allVolumes -hostPath $myFolder -containerPath "C:\Run\my"),
                     "--isolation $isolation",
                     "--restart $restart"
                    )
@@ -1741,7 +1772,7 @@ if (-not `$restartingInstance) {
                             )
 
             if ("$databaseServer" -ne "" -and $bcContainerHelperConfig.useSharedEncryptionKeys -and !$encryptionKeyExists) {
-                $sharedEncryptionKeyFile = Join-Path $hostHelperFolder "EncryptionKeys\$(-join [security.cryptography.sha256managed]::new().ComputeHash([Text.Encoding]::Utf8.GetBytes(([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($databaseCredential.Password))))).ForEach{$_.ToString("X2")})\DynamicsNAV.key"
+                $sharedEncryptionKeyFile = Join-Path $hostHelperFolder "EncryptionKeys\$(-join [security.cryptography.sha256managed]::new().ComputeHash([Text.Encoding]::Utf8.GetBytes(([System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($databaseCredential.Password))))).ForEach{$_.ToString("X2")})\DynamicsNAV-v$($version.Major).key"
                 if (Test-Path $sharedEncryptionKeyFile) {
                     Write-Host "Using Shared Encryption Key file"
                     Copy-Item -Path $sharedEncryptionKeyFile -Destination $containerEncryptionKeyFile
@@ -1754,10 +1785,18 @@ if (-not `$restartingInstance) {
         
         $parameters += $additionalParameters
     
+        # $parameters | Out-host
+
         if (!(DockerDo -accept_eula -accept_outdated:$accept_outdated -detach -imageName $imageName -parameters $parameters)) {
             return
         }
         Wait-BcContainerReady $containerName -timeout $timeout -startlog ""
+        if ($bcContainerHelperConfig.usePsSession) {
+            try {
+                Get-BcContainerSession -containerName $containerName -reinit -silent | Out-Null
+            } catch {}
+        }
+        
 
         if ($sharedEncryptionKeyFile -and !(Test-Path $sharedEncryptionKeyFile)) {
             Write-Host "Storing Container Encryption Key file"

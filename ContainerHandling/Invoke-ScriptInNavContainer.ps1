@@ -21,10 +21,9 @@ function Invoke-ScriptInBcContainer {
         [Parameter(Mandatory=$true)]
         [ScriptBlock] $scriptblock,
         [Parameter(Mandatory=$false)]
-        [Object[]] $argumentList
+        [Object[]] $argumentList,
+        [bool] $useSession = $bcContainerHelperConfig.usePsSession
     )
-
-    $useSession = (Get-ContainerHelperConfig).usePsSession
 
     if ($useSession) {
         try {
@@ -107,10 +106,10 @@ Set-Location $runPath
             'if ($result) { [System.Management.Automation.PSSerializer]::Serialize($result) | Set-Content "'+$outputFile+'" }' | Add-Content $file
             switch ($bcContainerHelperConfig.ContainerClient) {
                 'docker' {
-                    docker exec $containerName powershell $file
+                    docker exec $containerName powershell $file | Out-Host
                 }
                 'kubectl' {
-                    kubectl exec $containerName powershell $file
+                    kubectl exec $containerName powershell $file | Out-Host
                 }
             }
             if($LASTEXITCODE -ne 0) {
